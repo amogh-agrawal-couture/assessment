@@ -1,4 +1,4 @@
-git WITH recent_orders AS (
+WITH recent_orders AS (
     SELECT order_id, customer_id
     FROM orders
     WHERE order_date >= CURRENT_DATE - INTERVAL '1 year'
