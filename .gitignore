@@ -1,5 +1,4 @@
 .env
-.env.*
 .venv/
 .idea
 csv_output
