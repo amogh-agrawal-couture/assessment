@@ -33,11 +33,11 @@ SELECT
     cs.customer_id,
     cs.customer_name,
     cs.email,
-    ROUND(cs.total_spent,2) AS total_spent,
+    ROUND(cs.total_spent, 2) AS total_spent,
     csp.category AS most_purchased_category
 FROM customer_spending cs
 JOIN category_spending csp
     ON cs.customer_id = csp.customer_id
-   AND csp.rnk = 1
+    AND csp.rnk = 1
 ORDER BY cs.total_spent DESC
 LIMIT 5;

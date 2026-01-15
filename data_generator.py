@@ -1,10 +1,18 @@
 import os
 import random
 import csv
+import argparse
 from pathlib import Path
 from faker import Faker
 import psycopg2
+from psycopg2.extras import execute_values
 from dotenv import load_dotenv
+
+parser = argparse.ArgumentParser(description="Generate fake e-commerce data")
+parser.add_argument("--customers", type=int, default=300)
+parser.add_argument("--products", type=int, default=100)
+parser.add_argument("--orders", type=int, default=2000)
+args = parser.parse_args()
 
 load_dotenv()
 fake = Faker()
@@ -12,103 +20,150 @@ fake = Faker()
 OUTPUT_DIR = Path("csv_output")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-conn = psycopg2.connect(
-    host=os.getenv("POSTGRES_HOST"),
-    port=os.getenv("POSTGRES_PORT"),
-    user=os.getenv("POSTGRES_USER"),
-    password=os.getenv("POSTGRES_PASSWORD"),
-    dbname=os.getenv("POSTGRES_DB"),
+try:
+    conn = psycopg2.connect(
+        host=os.getenv("POSTGRES_HOST"),
+        port=os.getenv("POSTGRES_PORT"),
+        user=os.getenv("POSTGRES_USER"),
+        password=os.getenv("POSTGRES_PASSWORD"),
+        dbname=os.getenv("POSTGRES_DB"),
+    )
+    cur = conn.cursor()
+except psycopg2.OperationalError as e:
+    raise SystemExit(f"Failed to connect to PostgreSQL database: {e}")
+
+def write_csv(filename, headers, rows):
+    with open(OUTPUT_DIR / filename, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(headers)
+        writer.writerows(rows)
+
+NUM_CUSTOMERS = args.customers
+
+customers = [
+    (fake.name(), fake.unique.email(), fake.date_between("-2y", "today"))
+    for _ in range(NUM_CUSTOMERS)
+]
+
+execute_values(
+    cur,
+    """
+    INSERT INTO customers (customer_name, email, signup_date)
+    VALUES %s
+    RETURNING customer_id, customer_name, email, signup_date
+    """,
+    customers,
 )
-cur = conn.cursor()
 
-# ---------------- Customers ----------------
-NUM_CUSTOMERS = 300
-customers_csv = []
+customers_db = cur.fetchall()
+customer_ids = [c[0] for c in customers_db]
 
-for _ in range(NUM_CUSTOMERS):
-    name = fake.name()
-    email = fake.unique.email()
-    signup = fake.date_between(start_date="-2y", end_date="today")
+write_csv(
+    "customers.csv",
+    ["customer_id", "customer_name", "email", "signup_date"],
+    customers_db,
+)
 
-    customers_csv.append((name, email, signup))
-
-    cur.execute("""
-        INSERT INTO customers (customer_name, email, signup_date)
-        VALUES (%s,%s,%s)
-    """, (name, email, signup))
-
-# Write customers CSV
-with open(OUTPUT_DIR / "customers.csv", "w", newline="") as f:
-    writer = csv.writer(f)
-    writer.writerow(["customer_name", "email", "signup_date"])
-    writer.writerows(customers_csv)
-
-# ---------------- Products ----------------
 categories = ["Electronics", "Clothing", "Books", "Home", "Sports", "Beauty"]
-products_csv = []
+NUM_PRODUCTS = args.products
 
-for _ in range(100):
-    product_name = fake.word().capitalize()
-    category = random.choice(categories)
+products = [
+    (fake.word().capitalize(), random.choice(categories))
+    for _ in range(NUM_PRODUCTS)
+]
 
-    products_csv.append((product_name, category))
+execute_values(
+    cur,
+    """
+    INSERT INTO products (product_name, category)
+    VALUES %s
+    RETURNING product_id, product_name, category
+    """,
+    products,
+)
 
-    cur.execute("""
-        INSERT INTO products (product_name, category)
-        VALUES (%s,%s)
-    """, (product_name, category))
+products_db = cur.fetchall()
+product_ids = [p[0] for p in products_db]
 
-with open(OUTPUT_DIR / "products.csv", "w", newline="") as f:
-    writer = csv.writer(f)
-    writer.writerow(["product_name", "category"])
-    writer.writerows(products_csv)
+write_csv(
+    "products.csv",
+    ["product_id", "product_name", "category"],
+    products_db,
+)
 
-# ---------------- Orders & Order Items ----------------
+orders = []
+NUM_ORDERS = args.orders
+
+for _ in range(NUM_ORDERS):
+    orders.append(
+        (
+            random.choice(customer_ids),
+            fake.date_between("-18m", "today"),
+            0.0,
+        )
+    )
+
+execute_values(
+    cur,
+    """
+    INSERT INTO orders (customer_id, order_date, total_amount)
+    VALUES %s
+    RETURNING order_id, customer_id, order_date
+    """,
+    orders,
+)
+
+orders_db = cur.fetchall()
+order_items = []
 orders_csv = []
-order_items_csv = []
 
-for _ in range(2000):
-    customer_id = random.randint(1, NUM_CUSTOMERS)
-    order_date = fake.date_between(start_date="-18m", end_date="today")
-
-    cur.execute("""
-        INSERT INTO orders (customer_id, order_date, total_amount)
-        VALUES (%s,%s,0) RETURNING order_id
-    """, (customer_id, order_date))
-
-    order_id = cur.fetchone()[0]
+for order_id, customer_id, order_date in orders_db:
     total = 0
 
     for _ in range(random.randint(1, 6)):
-        product_id = random.randint(1, 100)
         qty = random.randint(1, 5)
         price = round(random.uniform(5, 500), 2)
+        product_id = random.choice(product_ids)
+
         total += qty * price
-
-        order_items_csv.append((order_id, product_id, qty, price))
-
-        cur.execute("""
-            INSERT INTO order_items (order_id, product_id, quantity, price_per_unit)
-            VALUES (%s,%s,%s,%s)
-        """, (order_id, product_id, qty, price))
+        order_items.append((order_id, product_id, qty, price))
 
     orders_csv.append((order_id, customer_id, order_date, total))
-    cur.execute("UPDATE orders SET total_amount=%s WHERE order_id=%s", (total, order_id))
 
-# Write orders CSV
-with open(OUTPUT_DIR / "orders.csv", "w", newline="") as f:
-    writer = csv.writer(f)
-    writer.writerow(["order_id", "customer_id", "order_date", "total_amount"])
-    writer.writerows(orders_csv)
+execute_values(
+    cur,
+    """
+    INSERT INTO order_items (order_id, product_id, quantity, price_per_unit)
+    VALUES %s
+    """,
+    order_items,
+)
 
-# Write order items CSV
-with open(OUTPUT_DIR / "order_items.csv", "w", newline="") as f:
-    writer = csv.writer(f)
-    writer.writerow(["order_id", "product_id", "quantity", "price_per_unit"])
-    writer.writerows(order_items_csv)
+execute_values(
+    cur,
+    """
+    UPDATE orders AS o
+    SET total_amount = c.total
+    FROM (VALUES %s) AS c(order_id, total)
+    WHERE o.order_id = c.order_id
+    """,
+    [(o[0], o[3]) for o in orders_csv],
+)
+
+write_csv(
+    "orders.csv",
+    ["order_id", "customer_id", "order_date", "total_amount"],
+    orders_csv,
+)
+
+write_csv(
+    "order_items.csv",
+    ["order_id", "product_id", "quantity", "price_per_unit"],
+    order_items,
+)
 
 conn.commit()
 cur.close()
 conn.close()
 
-print("Data generated + CSV files created.")
+print("Data generated")
