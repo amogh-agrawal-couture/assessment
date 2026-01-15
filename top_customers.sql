@@ -1,9 +1,15 @@
+-- Find the top 5 customers by total spending in the last 1 year
+-- and determine the product category they spent the most money on.
+
 WITH recent_orders AS (
+    -- Select orders placed within the last year
     SELECT order_id, customer_id
     FROM orders
     WHERE order_date >= CURRENT_DATE - INTERVAL '1 year'
 ),
+
 customer_spending AS (
+    -- Calculate total spending per customer based on order items
     SELECT
         c.customer_id,
         c.customer_name,
@@ -14,7 +20,10 @@ customer_spending AS (
     JOIN order_items oi ON ro.order_id = oi.order_id
     GROUP BY c.customer_id, c.customer_name, c.email
 ),
+
 category_spending AS (
+    -- Calculate spending per category for each customer
+    -- and rank categories by total spend per customer
     SELECT
         c.customer_id,
         p.category,
@@ -27,8 +36,11 @@ category_spending AS (
     JOIN recent_orders ro ON c.customer_id = ro.customer_id
     JOIN order_items oi ON ro.order_id = oi.order_id
     JOIN products p ON oi.product_id = p.product_id
-    GROUP BY c.customer_id, p.category
+    GROUP BY c.customer_id,p.category
 )
+
+-- Select top 5 customers by total spending
+-- along with their most purchased category
 SELECT
     cs.customer_id,
     cs.customer_name,
@@ -38,6 +50,6 @@ SELECT
 FROM customer_spending cs
 JOIN category_spending csp
     ON cs.customer_id = csp.customer_id
-    AND csp.rnk = 1
+   AND csp.rnk = 1
 ORDER BY cs.total_spent DESC
 LIMIT 5;
