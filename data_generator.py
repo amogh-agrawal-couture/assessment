@@ -8,6 +8,11 @@ from dotenv import load_dotenv
 from decimal import Decimal
 from schemas.schemas import Customer, Product, Order, OrderItem
 from db_utils import bulk_insert, bulk_update, write_csv
+import logging
+
+# Configure logging for better error visibility
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
 
 parser = argparse.ArgumentParser(description="Generate fake e-commerce data")
 parser.add_argument("--customers", type=int, default=300)
@@ -150,15 +155,53 @@ try:
 
     conn.commit()
 
-except Exception:
+except psycopg2.OperationalError as e:
+    # Connection-level errors (e.g., cannot connect, connection lost)
+    # Log full stack trace for diagnostics; closing resources where possible.
+    logger.exception("OperationalError while connecting to or using the DB: %s", e)
+    try:
+        if cur:
+            cur.close()
+    except Exception:
+        logger.debug("Error while closing cursor after OperationalError", exc_info=True)
+    try:
+        if conn:
+            conn.close()
+    except Exception:
+        logger.debug("Error while closing connection after OperationalError", exc_info=True)
+    raise
+
+except psycopg2.DatabaseError as e:
+    # Database errors (integrity, syntax, constraint violations, etc.)
+    # Log details and rollback transaction to leave DB in a clean state.
+    logger.exception("DatabaseError encountered; rolling back transaction: %s", e)
     if conn:
-        conn.rollback()
+        try:
+            conn.rollback()
+        except Exception:
+            logger.debug("Error during rollback after DatabaseError", exc_info=True)
+    raise
+
+except Exception as e:
+    # Fallback for any other unexpected exceptions: log, rollback then re-raise.
+    logger.exception("Unexpected exception occurred; attempting rollback: %s", e)
+    if conn:
+        try:
+            conn.rollback()
+        except Exception:
+            logger.debug("Error during rollback after unexpected exception", exc_info=True)
     raise
 
 finally:
     if cur:
-        cur.close()
+        try:
+            cur.close()
+        except Exception:
+            logger.debug("Error closing cursor in finally block", exc_info=True)
     if conn:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            logger.debug("Error closing connection in finally block", exc_info=True)
 
 print("Data generated")
