@@ -5,7 +5,7 @@ Small utility to generate sample e‑commerce data (customers, products, orders,
 This repository contains:
 
 - `data_generator.py` — main script that creates fake customers, products, orders and order items and writes CSVs.
-- `init.sql` — schema file to create the required tables and indexes.
+- `create_schema.py` — script to create the required tables and indexes using SQLAlchemy models.
 - `requirements.txt` — Python dependencies.
 - `run.sh` — convenience wrapper to run the generator (if present).
 - `docker-compose.yml` — optional local Postgres service for quick testing.
@@ -15,7 +15,7 @@ Quick plan / checklist
 
 1. Install dependencies
 2. Provide Postgres credentials via environment variables (or run Postgres via `docker-compose`)
-3. Initialize DB schema (`init.sql`)
+3. Initialize DB schema (`python create_schema.py`)
 4. Run the generator (`python data_generator.py` or `./run.sh`)
 5. Inspect CSVs in `csv_output/`
 
@@ -55,15 +55,15 @@ POSTGRES_DB=assessment_db
 
 Initialize the database schema
 
-If you have `psql` available and your database is created, run:
+If you have `psql` available and your database is created, run the provided script (it uses SQLAlchemy models to create tables if they do not exist):
 
 ```bash
-psql "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" -f init.sql
+python create_schema.py
 ```
 
 Optional: start a local Postgres via Docker Compose
 
-If you prefer, use the included `docker-compose.yml` to spin up a local Postgres instance. After `docker-compose up -d` you can run the `psql` command above using the credentials defined in the compose file.
+If you prefer, use the included `docker-compose.yml` to spin up a local Postgres instance. After `docker-compose up -d` run `python create_schema.py` to create tables in the database.
 
 Run the generator
 
@@ -107,7 +107,7 @@ Notes & troubleshooting
 
 - Missing environment variables: the script will fail when attempting to connect to Postgres. Use a `.env` file or export variables before running.
 - If `psycopg2` fails to install on macOS, try `pip install psycopg2-binary` (already in `requirements.txt`). If you need the non-binary build, ensure `libpq` and PostgreSQL development headers are installed via Homebrew.
-- If you see unique/constraint violations on reruns, either truncate the tables or drop and recreate the DB using `init.sql`.
+- If you see unique/constraint violations on reruns, either truncate the tables or drop and recreate the DB using the `python create_schema.py` script (or recreate the Postgres docker volume to start fresh).
 
 License
 

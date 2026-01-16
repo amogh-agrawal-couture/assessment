@@ -7,6 +7,10 @@ from faker import Faker
 import psycopg2
 from psycopg2.extras import execute_values
 from dotenv import load_dotenv
+from decimal import Decimal
+
+# validate with pydantic
+from schemas import Customer, Product, Order, OrderItem
 
 parser = argparse.ArgumentParser(description="Generate fake e-commerce data")
 parser.add_argument("--customers", type=int, default=300)
@@ -33,10 +37,17 @@ try:
     )
     cur = conn.cursor()
 
-    customers = [
-        (fake.name(), fake.unique.email(), fake.date_between("-2y", "today"))
-        for _ in range(args.customers)
-    ]
+    # Generate customers and validate
+    customers = []
+    for _ in range(args.customers):
+        cust = {
+            "customer_name": fake.name(),
+            "email": fake.unique.email(),
+            "signup_date": fake.date_between("-2y", "today"),
+        }
+        # validate
+        Customer.model_validate(cust)
+        customers.append((cust["customer_name"], cust["email"], cust["signup_date"]))
 
     execute_values(
         cur,
@@ -65,10 +76,11 @@ try:
 
     categories = ["Electronics", "Clothing", "Books", "Home", "Sports", "Beauty"]
 
-    products = [
-        (fake.word().capitalize(), random.choice(categories))
-        for _ in range(args.products)
-    ]
+    products = []
+    for _ in range(args.products):
+        prod = {"product_name": fake.word().capitalize(), "category": random.choice(categories)}
+        Product.model_validate(prod)
+        products.append((prod["product_name"], prod["category"]))
 
     execute_values(
         cur,
@@ -89,14 +101,9 @@ try:
         products_db,
     )
 
-    orders = [
-        (
-            random.choice(customer_ids),
-            fake.date_between("-18m", "today"),
-            0.0,
-        )
-        for _ in range(args.orders)
-    ]
+    orders = []
+    for _ in range(args.orders):
+        orders.append((random.choice(customer_ids), fake.date_between("-18m", "today"), Decimal("0.0")))
 
     execute_values(
         cur,
@@ -113,14 +120,25 @@ try:
     orders_csv = []
 
     for order_id, customer_id, order_date in orders_db:
-        total = 0
+        total = Decimal("0.0")
         for _ in range(random.randint(1, 6)):
             qty = random.randint(1, 5)
-            price = round(random.uniform(5, 500), 2)
+            price_f = round(random.uniform(5, 500), 2)
+            # convert price to Decimal for validation and DB accuracy
+            price = Decimal(f"{price_f:.2f}")
             product_id = random.choice(product_ids)
-            total += qty * price
+            total += price * qty
+            # validate order item
+            OrderItem.model_validate({
+                "order_id": order_id,
+                "product_id": product_id,
+                "quantity": qty,
+                "price_per_unit": price,
+            })
             order_items.append((order_id, product_id, qty, price))
 
+        # validate order
+        Order.model_validate({"customer_id": customer_id, "order_date": order_date, "total_amount": total})
         orders_csv.append((order_id, customer_id, order_date, total))
 
     execute_values(
