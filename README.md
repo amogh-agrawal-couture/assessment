@@ -82,12 +82,8 @@ Or use the wrapper (if present):
 What the script does
 
 - Generates fake customers (default 300), products (default 100), and orders (default 2000).
-- Uses bulk inserts (psycopg2.extras.execute_values) and chunking to avoid per-row INSERT statements. This greatly improves performance for large datasets.
-- Extracted reusable helper functions in `data_generator.py`:
-  - `chunked(iterable, size)` — yield chunks of a sequence
-  - `bulk_insert(cur, table, columns, rows, chunk_size=500)` — insert many rows with execute_values
-  - `bulk_insert_returning(cur, table, columns, rows, returning_col, chunk_size=500)` — insert and return generated serial ids
-  - `write_csv(path, header, rows)` — write rows to CSV
+- Uses bulk inserts (`psycopg2.extras.execute_values`) and chunking to avoid per-row INSERT statements. This greatly improves performance for large datasets.
+- Implements bulk inserts by calling `execute_values` directly in `data_generator.py`, and uses a small `write_csv(path, header, rows)` helper to write rows to CSV.
 - Writes generated data to CSV files in `csv_output/`:
   - `customers.csv`
   - `products.csv`
