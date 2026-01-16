@@ -4,12 +4,16 @@ Small utility to generate sample e‑commerce data (customers, products, orders,
 
 This repository contains:
 
-- `data_generator.py` — main script that creates fake customers, products, orders and order items and writes CSVs.
-- `create_schema.py` — script to create the required tables and indexes using SQLAlchemy models.
+- `data_generator.py` — main script that creates fake customers, products, orders and order items and writes CSVs. Uses Pydantic models for validation.
+- `models.py` — SQLAlchemy models representing the DB schema.
+- `create_schema.py` — script to create the required tables and indexes using SQLAlchemy models (replaces `init.sql`).
+- `db_utils.py` — small DB helper functions (bulk insert/update, CSV writer) used by the generator.
 - `requirements.txt` — Python dependencies.
-- `run.sh` — convenience wrapper to run the generator (if present).
+- `run.sh` — convenience wrapper to start Postgres, create the schema and run the generator.
 - `docker-compose.yml` — optional local Postgres service for quick testing.
 - `csv_output/` — output CSV files produced by the script.
+
+Note: `init.sql` is kept for historical/reference purposes only; schema creation is now done in Python via `models.py` + `create_schema.py`.
 
 Quick plan / checklist
 
@@ -33,9 +37,17 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+Dependencies of note in `requirements.txt`:
+
+- `psycopg2-binary` — Postgres driver
+- `faker` — data generation
+- `python-dotenv` — load .env files
+- `pydantic` — runtime data validation
+- `sqlalchemy` — models and schema creation
+
 Environment variables
 
-The script reads Postgres connection settings from environment variables. Create a `.env` file or export them in your shell:
+The scripts read Postgres connection settings from environment variables. Create a `.env` file or export them in your shell:
 
 - POSTGRES_HOST (e.g., localhost)
 - POSTGRES_PORT (e.g., 5432)
@@ -55,15 +67,18 @@ POSTGRES_DB=assessment_db
 
 Initialize the database schema
 
-If you have `psql` available and your database is created, run the provided script (it uses SQLAlchemy models to create tables if they do not exist):
+Create the database (if missing) and then run the SQLAlchemy-based creator. This will create tables and indexes if they do not already exist:
 
 ```bash
 python create_schema.py
 ```
 
-Optional: start a local Postgres via Docker Compose
+If you prefer Docker Compose, start the Postgres service first, then run the schema creator:
 
-If you prefer, use the included `docker-compose.yml` to spin up a local Postgres instance. After `docker-compose up -d` run `python create_schema.py` to create tables in the database.
+```bash
+docker-compose up -d
+python create_schema.py
+```
 
 Run the generator
 
@@ -73,39 +88,43 @@ Make sure the environment variables are set and then run:
 python data_generator.py
 ```
 
-Or use the wrapper (if present):
+Or use the wrapper (which starts the DB, creates the schema, then runs the generator):
 
 ```bash
 ./run.sh
 ```
 
-What the script does
+Logging
 
-- Generates fake customers (default 300), products (default 100), and orders (default 2000).
-- Uses bulk inserts (`psycopg2.extras.execute_values`) and chunking to avoid per-row INSERT statements. This greatly improves performance for large datasets.
-- Implements bulk inserts by calling `execute_values` directly in `data_generator.py`, and uses a small `write_csv(path, header, rows)` helper to write rows to CSV.
-- Writes generated data to CSV files in `csv_output/`:
-  - `customers.csv`
-  - `products.csv`
-  - `orders.csv`
-  - `order_items.csv`
+By default `data_generator.py` logs to the console (stderr) with timestamps and stack traces on errors. For short runs this is usually sufficient. To persist logs to disk, add a `RotatingFileHandler` (example in the notes below) or enable a custom logging configuration.
 
-Configuration knobs
+What the scripts do
 
-Open `data_generator.py` and change these constants near the top of the file:
-
-- `NUM_CUSTOMERS` — number of customers to generate (default 300)
-- `NUM_PRODUCTS` — number of products to generate (default 100)
-- `NUM_ORDERS` — number of orders to generate (default 2000)
-- `chunk_size` — passed to the bulk functions; default 500
+- `create_schema.py`: reads DB connection from environment variables and runs `Base.metadata.create_all(engine)` using the SQLAlchemy models in `models.py`.
+- `data_generator.py`: generates fake customers/products/orders/order_items, validates rows with Pydantic models, uses `db_utils.bulk_insert` and `db_utils.bulk_update` for efficient bulk operations, writes CSVs to `csv_output/`, and commits in a single transaction.
+- `db_utils.py`: helper functions to centralize execute_values usage and CSV writing.
 
 Notes & troubleshooting
 
 - Missing environment variables: the script will fail when attempting to connect to Postgres. Use a `.env` file or export variables before running.
-- If `psycopg2` fails to install on macOS, try `pip install psycopg2-binary` (already in `requirements.txt`). If you need the non-binary build, ensure `libpq` and PostgreSQL development headers are installed via Homebrew.
-- If you see unique/constraint violations on reruns, either truncate the tables or drop and recreate the DB using the `python create_schema.py` script (or recreate the Postgres docker volume to start fresh).
+- If you see unique/constraint violations on reruns, either TRUNCATE the tables and restart the generator, or recreate the Postgres docker volume to start with a fresh DB.
+  - Example truncate: `psql "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" -c "TRUNCATE order_items, orders, products, customers RESTART IDENTITY CASCADE;"`
+- If you want a migrations workflow (recommended if the schema will change over time), switch to Alembic: scaffold `alembic/`, point `target_metadata` to `models.Base.metadata`, autogenerate an initial revision, and then use `alembic upgrade head`.
+
+Optional: persistent file logging (example)
+
+If you want logs written to disk as well as console, add a rotating file handler. Example snippet (drop into `data_generator.py` near the top where logging is configured):
+
+```python
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+log_dir = Path('logs')
+log_dir.mkdir(exist_ok=True)
+handler = RotatingFileHandler(log_dir / 'data_generator.log', maxBytes=10_000_000, backupCount=5)
+handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
+logger.addHandler(handler)
+```
 
 License
 
 This repository contains example code for assessment/demo use. Use as you wish.
-
