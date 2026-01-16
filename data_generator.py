@@ -1,16 +1,13 @@
 import os
 import random
-import csv
 import argparse
 from pathlib import Path
 from faker import Faker
 import psycopg2
-from psycopg2.extras import execute_values
 from dotenv import load_dotenv
 from decimal import Decimal
-
-# validate with pydantic
-from schemas import Customer, Product, Order, OrderItem
+from schemas.schemas import Customer, Product, Order, OrderItem
+from db_utils import bulk_insert, bulk_update, write_csv
 
 parser = argparse.ArgumentParser(description="Generate fake e-commerce data")
 parser.add_argument("--customers", type=int, default=300)
@@ -45,77 +42,63 @@ try:
             "email": fake.unique.email(),
             "signup_date": fake.date_between("-2y", "today"),
         }
-        # validate
         Customer.model_validate(cust)
         customers.append((cust["customer_name"], cust["email"], cust["signup_date"]))
 
-    execute_values(
+    customers_db = bulk_insert(
         cur,
-        """
-        INSERT INTO customers (customer_name, email, signup_date)
-        VALUES %s
-        RETURNING customer_id, customer_name, email, signup_date
-        """,
+        "customers",
+        ["customer_name", "email", "signup_date"],
         customers,
+        returning=["customer_id", "customer_name", "email", "signup_date"]
     )
 
-    customers_db = cur.fetchall()
     customer_ids = [c[0] for c in customers_db]
 
-    def write_csv(filename, headers, rows):
-        with open(OUTPUT_DIR / filename, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(headers)
-            writer.writerows(rows)
-
     write_csv(
-        "customers.csv",
+        OUTPUT_DIR / "customers.csv",
         ["customer_id", "customer_name", "email", "signup_date"],
         customers_db,
     )
 
+    # Generate products
     categories = ["Electronics", "Clothing", "Books", "Home", "Sports", "Beauty"]
-
     products = []
     for _ in range(args.products):
         prod = {"product_name": fake.word().capitalize(), "category": random.choice(categories)}
         Product.model_validate(prod)
         products.append((prod["product_name"], prod["category"]))
 
-    execute_values(
+    products_db = bulk_insert(
         cur,
-        """
-        INSERT INTO products (product_name, category)
-        VALUES %s
-        RETURNING product_id, product_name, category
-        """,
+        "products",
+        ["product_name", "category"],
         products,
+        returning=["product_id", "product_name", "category"]
     )
 
-    products_db = cur.fetchall()
     product_ids = [p[0] for p in products_db]
 
     write_csv(
-        "products.csv",
+        OUTPUT_DIR / "products.csv",
         ["product_id", "product_name", "category"],
         products_db,
     )
 
+    # Generate orders
     orders = []
     for _ in range(args.orders):
         orders.append((random.choice(customer_ids), fake.date_between("-18m", "today"), Decimal("0.0")))
 
-    execute_values(
+    orders_db = bulk_insert(
         cur,
-        """
-        INSERT INTO orders (customer_id, order_date, total_amount)
-        VALUES %s
-        RETURNING order_id, customer_id, order_date
-        """,
+        "orders",
+        ["customer_id", "order_date", "total_amount"],
         orders,
+        returning=["order_id", "customer_id", "order_date"]
     )
 
-    orders_db = cur.fetchall()
+    # Generate order items
     order_items = []
     orders_csv = []
 
@@ -124,11 +107,9 @@ try:
         for _ in range(random.randint(1, 6)):
             qty = random.randint(1, 5)
             price_f = round(random.uniform(5, 500), 2)
-            # convert price to Decimal for validation and DB accuracy
             price = Decimal(f"{price_f:.2f}")
             product_id = random.choice(product_ids)
             total += price * qty
-            # validate order item
             OrderItem.model_validate({
                 "order_id": order_id,
                 "product_id": product_id,
@@ -137,38 +118,32 @@ try:
             })
             order_items.append((order_id, product_id, qty, price))
 
-        # validate order
         Order.model_validate({"customer_id": customer_id, "order_date": order_date, "total_amount": total})
         orders_csv.append((order_id, customer_id, order_date, total))
 
-    execute_values(
+    bulk_insert(
         cur,
-        """
-        INSERT INTO order_items (order_id, product_id, quantity, price_per_unit)
-        VALUES %s
-        """,
-        order_items,
+        "order_items",
+        ["order_id", "product_id", "quantity", "price_per_unit"],
+        order_items
     )
 
-    execute_values(
+    bulk_update(
         cur,
-        """
-        UPDATE orders AS o
-        SET total_amount = c.total
-        FROM (VALUES %s) AS c(order_id, total)
-        WHERE o.order_id = c.order_id
-        """,
+        "orders",
+        {"total_amount": "c.col1"},
         [(o[0], o[3]) for o in orders_csv],
+        "o.order_id = c.col0"
     )
 
     write_csv(
-        "orders.csv",
+        OUTPUT_DIR / "orders.csv",
         ["order_id", "customer_id", "order_date", "total_amount"],
         orders_csv,
     )
 
     write_csv(
-        "order_items.csv",
+        OUTPUT_DIR / "order_items.csv",
         ["order_id", "product_id", "quantity", "price_per_unit"],
         order_items,
     )
