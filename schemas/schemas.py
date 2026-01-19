@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, validator
+from pydantic import BaseModel, EmailStr, field_validator
 from datetime import date
 from decimal import Decimal
 
@@ -26,8 +26,8 @@ class OrderItem(BaseModel):
     quantity: int
     price_per_unit: Decimal
 
-    @validator("quantity")
-    def quantity_must_be_positive(cls, v):
+    @field_validator("quantity")
+    def quantity_must_be_positive(self, v):
         if v <= 0:
             raise ValueError("quantity must be > 0")
         return v
