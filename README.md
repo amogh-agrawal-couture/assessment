@@ -5,7 +5,7 @@ Small utility to generate sample e‑commerce data (customers, products, orders,
 This repository contains:
 
 - `data_generator.py` — main script that creates fake customers, products, orders and order items and writes CSVs. Uses Pydantic models for validation.
-- `models.py` — SQLAlchemy models representing the DB schema.
+- `models/models.py` — SQLAlchemy models representing the DB schema.
 - `create_schema.py` — script to create the required tables and indexes using SQLAlchemy models (replaces `init.sql`).
 - `db_utils.py` — small DB helper functions (bulk insert/update, CSV writer) used by the generator.
 - `requirements.txt` — Python dependencies.
