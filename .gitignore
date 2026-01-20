@@ -1,0 +1,6 @@
+.env
+.venv/
+.idea
+csv_output
+__pycache__/
+*.py[cod]
