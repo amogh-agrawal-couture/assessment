@@ -1,3 +1,4 @@
+#!/bin/bash
 set -e
 docker-compose up -d
 python create_schema.py
